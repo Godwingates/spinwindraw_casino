@@ -1,5 +1,5 @@
 const express = require("express");
-const mysql = require("mysql2/promise");
+const { Pool } = require("pg");
 const bcrypt = require("bcrypt");
 const cors = require("cors");
 
@@ -11,48 +11,37 @@ app.use(cors());
 app.use(express.json());
 
 // ================= DATABASE CONNECTION =================
-const dbConfig = {
-  host: process.env.DB_HOST || "cpanel-h45.registrar-servers.com",
-  user: process.env.DB_USER || "spinwindraw_casino",
-  password: process.env.DB_PASSWORD || "Uganda@2026",
-  database: process.env.DB_NAME || "spinwindraw_casino",
-  port: process.env.DB_PORT || 3306,
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-};
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
 
-let pool;
-
-// Initialize database connection pool
+// Initialize database
 async function initDatabase() {
   try {
-    pool = mysql.createPool(dbConfig);
-    
     // Test connection
-    const connection = await pool.getConnection();
-    console.log("✅ Connected to MySQL database");
-    console.log(`📍 Connected to: ${dbConfig.host}:${dbConfig.port}`);
-    connection.release();
+    const client = await pool.connect();
+    console.log("✅ Connected to PostgreSQL database");
+    client.release();
 
     // Create users table if it doesn't exist
-    const [result] = await pool.execute(`
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS users (
-        id INT AUTO_INCREMENT PRIMARY KEY,
+        id SERIAL PRIMARY KEY,
         firstName VARCHAR(100),
         lastName VARCHAR(100),
         username VARCHAR(100) UNIQUE,
         email VARCHAR(100) UNIQUE,
         phone VARCHAR(20),
         password VARCHAR(255),
-        balance INT DEFAULT 0
+        balance INTEGER DEFAULT 0
       )
     `);
     console.log("✅ Users table ready");
   } catch (err) {
     console.error("❌ Database error:", err.message);
     console.error("Full error:", err);
-    process.exit(1); // Exit if can't connect to database
+    process.exit(1);
   }
 }
 
@@ -81,15 +70,15 @@ app.post("/api/signup", async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await pool.execute(
+    await pool.query(
       `INSERT INTO users (firstName, lastName, username, email, phone, password)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [firstName, lastName, username, email, phone, hashedPassword]
     );
 
     res.json({ success: true, message: "Account created successfully" });
   } catch (err) {
-    if (err.code === 'ER_DUP_ENTRY') {
+    if (err.code === '23505') { // PostgreSQL unique violation
       return res.json({ success: false, message: "Username, email, or phone already exists" });
     }
     console.error("Signup error:", err);
@@ -106,16 +95,16 @@ app.post("/api/login", async (req, res) => {
   }
 
   try {
-    const [rows] = await pool.execute(
-      `SELECT * FROM users WHERE phone = ?`,
+    const result = await pool.query(
+      `SELECT * FROM users WHERE phone = $1`,
       [phone]
     );
 
-    if (rows.length === 0) {
+    if (result.rows.length === 0) {
       return res.json({ success: false, message: "Invalid phone number or password" });
     }
 
-    const user = rows[0];
+    const user = result.rows[0];
     const match = await bcrypt.compare(password, user.password);
     
     if (!match) {
@@ -141,16 +130,16 @@ app.post("/api/login", async (req, res) => {
 // ================= GET USER BALANCE =================
 app.get("/api/user/:id/balance", async (req, res) => {
   try {
-    const [rows] = await pool.execute(
-      `SELECT balance FROM users WHERE id = ?`,
+    const result = await pool.query(
+      `SELECT balance FROM users WHERE id = $1`,
       [req.params.id]
     );
 
-    if (rows.length === 0) {
+    if (result.rows.length === 0) {
       return res.json({ success: false, message: "User not found" });
     }
 
-    res.json({ success: true, balance: rows[0].balance });
+    res.json({ success: true, balance: result.rows[0].balance });
   } catch (err) {
     console.error("Balance error:", err);
     res.json({ success: false, message: "Server error" });
@@ -162,17 +151,17 @@ app.post("/api/user/:id/balance", async (req, res) => {
   const { amount } = req.body;
 
   try {
-    await pool.execute(
-      `UPDATE users SET balance = balance + ? WHERE id = ?`,
+    await pool.query(
+      `UPDATE users SET balance = balance + $1 WHERE id = $2`,
       [amount, req.params.id]
     );
 
-    const [rows] = await pool.execute(
-      `SELECT balance FROM users WHERE id = ?`,
+    const result = await pool.query(
+      `SELECT balance FROM users WHERE id = $1`,
       [req.params.id]
     );
 
-    res.json({ success: true, balance: rows[0].balance });
+    res.json({ success: true, balance: result.rows[0].balance });
   } catch (err) {
     console.error("Update balance error:", err);
     res.json({ success: false, message: "Server error" });
