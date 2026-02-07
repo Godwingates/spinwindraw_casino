@@ -11,12 +11,12 @@ app.use(cors());
 app.use(express.json());
 
 // ================= DATABASE CONNECTION =================
-// For production, use environment variables
 const dbConfig = {
-  host: process.env.DB_HOST || "your-cpanel-domain.com", // Replace with your actual domain or IP
+  host: process.env.DB_HOST || "cpanel-h45.registrar-servers.com",
   user: process.env.DB_USER || "spinwindraw_casino",
-  password: process.env.DB_PASSWORD || "YOUR_DATABASE_PASSWORD", // Replace this
+  password: process.env.DB_PASSWORD || "Uganda@2026",
   database: process.env.DB_NAME || "spinwindraw_casino",
+  port: process.env.DB_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -32,6 +32,7 @@ async function initDatabase() {
     // Test connection
     const connection = await pool.getConnection();
     console.log("✅ Connected to MySQL database");
+    console.log(`📍 Connected to: ${dbConfig.host}:${dbConfig.port}`);
     connection.release();
 
     // Create users table if it doesn't exist
@@ -50,6 +51,7 @@ async function initDatabase() {
     console.log("✅ Users table ready");
   } catch (err) {
     console.error("❌ Database error:", err.message);
+    console.error("Full error:", err);
     process.exit(1); // Exit if can't connect to database
   }
 }
